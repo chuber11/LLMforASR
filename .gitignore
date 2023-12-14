@@ -1,0 +1,4 @@
+*.cased
+*.seg.aligned
+__pycache__/*
+saves/*

@@ -1,4 +1,4 @@
 
 clear
-CUDA_VISIBLE_DEVICES=1 python model.py
+CUDA_VISIBLE_DEVICES=2 python train.py
 

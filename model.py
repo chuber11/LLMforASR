@@ -1,6 +1,7 @@
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -10,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple, Union
 from types import MethodType
 
-def printms(t):
-    print(t.mean().item(),t.std().item())
+def printms(s,t):
+    print(s,t.shape,t.mean().item(),t.std().item())
 
 def forward_llm(
     self,
@@ -24,14 +25,12 @@ def forward_llm(
 ) -> CausalLMOutputWithPast:
     if audio_features is not None: # first forward call of generate
         hidden_states = self.transformer.embd(input_ids)
-        #printms(hidden_states)
-        #printms(audio_features)
-        hidden_states = torch.cat([hidden_states[:,:1],
-                                   audio_features.to(hidden_states.dtype),
-                                   hidden_states[:,1:]],1)
-        attention_mask = torch.cat([attention_mask[:,:1],
-                                    torch.ones(audio_features.shape[:2],dtype=attention_mask.dtype, device=attention_mask.device),
-                                    attention_mask[:,1:]],1)
+        #printms("H",hidden_states)
+        #printms("A",audio_features)
+        hidden_states = torch.cat([audio_features.to(hidden_states.dtype),
+                                   hidden_states],1)
+        attention_mask = torch.cat([torch.ones(audio_features.shape[:2],dtype=attention_mask.dtype, device=attention_mask.device),
+                                    attention_mask],1)
     else:
         hidden_states = self.transformer.embd(input_ids)
 
@@ -46,6 +45,7 @@ def forward_llm(
 
     loss = None
     if labels is not None:
+        lm_logits = lm_logits[:,audio_features.shape[1]:]
         loss = self.loss(lm_logits, labels)
 
     return CausalLMOutputWithPast(loss=loss, logits=lm_logits, past_key_values=past_key_values)
@@ -112,11 +112,27 @@ def prepare_inputs_for_generation(
         "attention_mask": attention_mask,
     }
 
-class ASRModel(nn.Module):
+class BridgeNetwork(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.decoder = AutoModelForCausalLM.from_pretrained("microsoft/phi-2", torch_dtype="auto", flash_attn=True, flash_rotary=True, fused_dense=True, device_map="cuda", trust_remote_code=True)
+        self.cnn1 = nn.Conv1d(1280,1280,2,2)
+        self.cnn2 = nn.Conv1d(1280,1280,2,2)
+        self.cnn3 = nn.Conv1d(1280,2560,2,2)
+
+    def forward(self, inp):
+        out = inp.transpose(2,1)
+        out = F.gelu(self.cnn1(out))
+        out = F.gelu(self.cnn2(out))
+        out = self.cnn3(out)
+        out = out.transpose(2,1)
+        return out
+
+class ASRModel(nn.Module):
+    def __init__(self, decoder_name="microsoft/phi-2", audio_encoder_name="openai/whisper-large-v3", tokenizer=None):
+        super().__init__()
+
+        self.decoder = AutoModelForCausalLM.from_pretrained(decoder_name, torch_dtype="auto", flash_attn=True, flash_rotary=True, fused_dense=True, device_map="cuda", trust_remote_code=True)
 
         self.decoder.forward = MethodType(forward_llm, self.decoder) # Ugly but works
         self.decoder.prepare_inputs_for_generation = MethodType(prepare_inputs_for_generation, self.decoder)
@@ -124,29 +140,33 @@ class ASRModel(nn.Module):
         for p in self.decoder.parameters(): # Freeze decoder
             p.requires_grad = False
 
-        self.audio_encoder = WhisperForConditionalGeneration.from_pretrained("openai/whisper-large-v3", torch_dtype="auto", device_map="cuda")
+        self.audio_encoder = WhisperForConditionalGeneration.from_pretrained(audio_encoder_name, torch_dtype="auto", device_map="cuda").model.encoder
 
         for p in self.audio_encoder.parameters(): # Freeze audio encoder
             p.requires_grad = False
 
-        self.bridge_network = None
+        self.bridge_network = BridgeNetwork()
 
-        self.tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2", trust_remote_code=True)
-
-        self.prompt = "This was an audio recording. I think the transcript is: "
+        self.tokenizer = AutoTokenizer.from_pretrained(decoder_name, trust_remote_code=True) if tokenizer is None else tokenizer
+        self.prompt = "This was an audio recording. I think the transcript is as follows: "
 
         print(f"Number of parameters: {sum(p.numel() for p in self.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in self.parameters() if p.requires_grad)/1000000:.0f} M")
 
-    def encode_audio(self, wav_samples):
-        audio_features = 0.03*torch.randn(len(wav_samples),100,2560,device="cuda") # TODO
-        return audio_features
+    def encode_audio(self, audio_features):
+        audio_features = 0.8*self.audio_encoder(audio_features).last_hidden_state
+        return self.bridge_network(audio_features)
 
-    def forward(self, wav_samples, text_labels=None):
+    def forward(self, audio_features, text_labels=None):
+        audio_features = self.encode_audio(audio_features)
+
         if text_labels is not None:
-            pass
+            text_labels["audio_features"] = audio_features
+            text_labels["labels"] = text_labels["input_ids"]
+            prediction = self.decoder(**text_labels)
+            return prediction
         else:
-            inputs = self.tokenizer([self.prompt for _ in wav_samples], return_tensors="pt", return_attention_mask=False).to("cuda")
-            inputs["audio_features"] = self.encode_audio(wav_samples)
+            inputs = self.tokenizer([self.prompt for _ in audio_features], return_tensors="pt", return_attention_mask=False).to("cuda")
+            inputs["audio_features"] = audio_features
             
             outputs = self.decoder.generate(**inputs, max_new_tokens=100)
             text = self.tokenizer.batch_decode(outputs)
