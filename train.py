@@ -52,8 +52,9 @@ decoder_name = "microsoft/phi-2"
 audio_encoder_name = "openai/whisper-large-v3"
 
 tokenizer = AutoTokenizer.from_pretrained(decoder_name, trust_remote_code=True)
+tokenizer.pad_token = "<|pad|>"
+#tokenizer.pad_token_id = -100
 breakpoint()
-tokenizer.pad_token = tokenizer.eos_token
 processor = WhisperProcessor.from_pretrained(audio_encoder_name)
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
 

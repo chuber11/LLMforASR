@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple, Union
 from types import MethodType
 
+from torch.cuda.amp import autocast
+
 def printms(s,t):
     print(s,t.shape,t.mean().item(),t.std().item())
 
@@ -116,16 +118,19 @@ class BridgeNetwork(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.cnn1 = nn.Conv1d(1280,1280,2,2)
-        self.cnn2 = nn.Conv1d(1280,1280,2,2)
-        self.cnn3 = nn.Conv1d(1280,2560,2,2)
+        dim_h = 1280
+        
+        self.cnn1 = nn.Conv1d(1280,dim_h,4,2)
+        self.cnn2 = nn.Conv1d(dim_h,dim_h,4,2)
+        self.cnn3 = nn.Conv1d(dim_h,2560,4,2)
 
     def forward(self, inp):
-        out = inp.transpose(2,1)
-        out = F.gelu(self.cnn1(out))
-        out = F.gelu(self.cnn2(out))
-        out = self.cnn3(out)
-        out = out.transpose(2,1)
+        with autocast(enabled=True):
+            out = inp.transpose(2,1)
+            out = self.cnn1(out)
+            out = self.cnn2(F.gelu(out))
+            out = self.cnn3(F.gelu(out))
+            out = out.transpose(2,1)
         return out
 
 class ASRModel(nn.Module):
@@ -145,7 +150,7 @@ class ASRModel(nn.Module):
         for p in self.audio_encoder.parameters(): # Freeze audio encoder
             p.requires_grad = False
 
-        self.bridge_network = BridgeNetwork()
+        self.bridge_network = BridgeNetwork().to("cuda")
 
         self.tokenizer = AutoTokenizer.from_pretrained(decoder_name, trust_remote_code=True) if tokenizer is None else tokenizer
         self.prompt = "This was an audio recording. I think the transcript is as follows: "
@@ -168,15 +173,27 @@ class ASRModel(nn.Module):
             inputs = self.tokenizer([self.prompt for _ in audio_features], return_tensors="pt", return_attention_mask=False).to("cuda")
             inputs["audio_features"] = audio_features
             
-            outputs = self.decoder.generate(**inputs, max_new_tokens=100)
+            outputs = self.decoder.generate(**inputs, max_new_tokens=200)
             text = self.tokenizer.batch_decode(outputs)
 
             return text
 
 if __name__ == "__main__":
-    model = ASRModel()
+    from data import MyDataset, DataCollatorSpeechSeq2SeqWithPadding
 
-    transcript = model([0,1])
+    model = ASRModel()
+    model.tokenizer.pad_token = model.tokenizer.eos_token
+
+    dataset = MyDataset(dev=True)
+
+    audio_encoder_name = "openai/whisper-large-v3"
+    processor = WhisperProcessor.from_pretrained(audio_encoder_name)
+
+    data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=model.tokenizer)
+
+    data = data_collator([dataset[0],dataset[1]])
+
+    transcript = model(data["audio_features"].to("cuda").half())
 
     for t in transcript:
         print(t)
