@@ -1,6 +1,7 @@
 
 import torch
 import soundfile as sf
+#import librosa
 from torch.utils.data import Dataset
 
 from glob import glob
@@ -9,11 +10,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
 import math
+import random
 
 class MyDataset(Dataset):
     def __init__(self, dev=False, segfiles=None, replace=None):
         if segfiles is None:
-            segfiles = "cv.train.seg.aligned"
+            segfiles = "data/*.train.seg.aligned"
             #segfiles = "/project/OML/chuber/2022/NMTGMinor/exp/ASR-NW/data/orig_en_cased/cv.train.seg.aligned"
             #segfiles = "/project/OML/chuber/2022/NMTGMinor/exp/ASR-NW/data/orig_en_cased/*.train.seg.aligned"
 
@@ -46,12 +48,23 @@ class MyDataset(Dataset):
                 #if len(self.audio_paths) >= 16*3:
                 #    break
 
+        random.seed(42)
+
+        combined_lists = list(zip(self.audio_paths, self.timestamps, self.labels))
+        random.shuffle(combined_lists)
+        self.audio_paths, self.timestamps, self.labels = zip(*combined_lists)
+
+        self.len = len(self.audio_paths)
+        if dev:
+            self.len = min(2000,self.len)
+
     def __len__(self):
-        return len(self.audio_paths)
+        return self.len
 
     def __getitem__(self, idx):
         #audio, sr = torchaudio.load(self.audio_paths[idx])
         audio, sr = sf.read(self.audio_paths[idx])
+        #audio, sr = librosa.load(self.audio_paths[idx])
         if self.timestamps[idx] is not None: # TODO: only load relevant audio
             start, end = self.timestamps[idx]
             audio = audio[:,int(1600*start),int(16000*end)]
@@ -67,13 +80,22 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
 
         audio = torch.cat([self.processor(item["audio"], sampling_rate=16000, return_tensors="pt").input_features for item in features], dim=0)
-        input_ids = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
+        text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
 
-        batch = {"audio_features": audio, "text_labels":input_ids}
+        input_ids, attention_mask = text_labels["input_ids"], text_labels["attention_mask"]
+
+        input_ids = torch.cat([input_ids,torch.full((input_ids.shape[0],1), self.tokenizer.eos_token_id)],1)
+        attention_mask = torch.cat([attention_mask,torch.ones(attention_mask.shape[0],1)],1)
+
+        text_labels = {"input_ids": input_ids, "attention_mask":attention_mask}
+
+        batch = {"audio_features": audio, "text_labels":text_labels}
 
         return batch
 
 def compute_metrics(pred):
+    print(pred)
+    breakpoint()
     return {}
 
     breakpoint()
