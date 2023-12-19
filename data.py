@@ -13,7 +13,7 @@ import math
 import random
 
 class MyDataset(Dataset):
-    def __init__(self, dev=False, segfiles=None, replace=None):
+    def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000):
         if segfiles is None:
             segfiles = "data/*.train.seg.aligned"
             #segfiles = "/project/OML/chuber/2022/NMTGMinor/exp/ASR-NW/data/orig_en_cased/cv.train.seg.aligned"
@@ -58,7 +58,7 @@ class MyDataset(Dataset):
 
         self.len = len(self.audio_paths)
         if dev:
-            self.len = min(2000,self.len)
+            self.len = min(max_len,self.len)
 
     def __len__(self):
         return self.len
@@ -78,6 +78,7 @@ class MyDataset(Dataset):
 class DataCollatorSpeechSeq2SeqWithPadding:
     processor: Any
     tokenizer: Any
+    return_ids: bool = False
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
 
@@ -91,7 +92,9 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         text_labels = {"input_ids": input_ids, "attention_mask":attention_mask}
 
-        batch = {"audio_features": audio, "text_labels":text_labels, "ids":[item["id"] for item in features]}
+        batch = {"audio_features": audio, "text_labels":text_labels}
+        if self.return_ids:
+            batch["ids"] = [item["id"] for item in features]
 
         return batch
 

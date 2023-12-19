@@ -13,12 +13,12 @@ from tqdm import tqdm
 model = ASRModel()
 model.load()
 
-dataset = MyDataset(segfiles="data_test/*.test.seg.aligned", dev=True)
+dataset = MyDataset(segfiles="data_test/*.test.seg.aligned")
 
 audio_encoder_name = "openai/whisper-large-v3"
 processor = WhisperProcessor.from_pretrained(audio_encoder_name)
 
-data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=model.tokenizer)
+data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=model.tokenizer, return_ids=True)
 
 batch_size = 8
 
