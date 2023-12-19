@@ -6,7 +6,7 @@ from torch.nn import CrossEntropyLoss
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from transformers import WhisperForConditionalGeneration
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from transformers.cache_utils import Cache
@@ -253,12 +253,17 @@ class ASRModel(PreTrainedModel):
     def inference(self, inputs):
         if "input_ids" not in inputs:
             inputs["input_ids"] = torch.ones(inputs["audio_features"].shape[0], 1, device="cuda", dtype=torch.int64)
+        else:
+            print("IN",self.tokenizer.batch_decode(inputs["input_ids"])[0])
+
         inputs["audio_features"] = self.encode_audio(inputs["audio_features"]) #.half())
         
         outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6)
         text = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        
+        print("OUT",self.tokenizer.batch_decode(outputs)[0])
 
-        text = [t if not t.startswith("<unk> ") else t[len("<unk> "):] for t in text]
+        #text = [t if not t.startswith("<unk> ") else t[len("<unk> "):] for t in text]
 
         return text
 
@@ -266,7 +271,7 @@ class ASRModel(PreTrainedModel):
         os.makedirs(save_directory, exist_ok=True)
         torch.save(self.bridge_network.state_dict(), save_directory+"/bridge_network.pt")
 
-    def load(self, path="saves/checkpoint-10"):
+    def load(self, path="saves/checkpoint-20000"):
         self.bridge_network.load_state_dict(torch.load(path+"/bridge_network.pt"))
         """from safetensors.torch import load_file as safe_load_file
         from glob import glob
@@ -278,27 +283,4 @@ class ASRModel(PreTrainedModel):
                 state_dict[k] = v
 
         self.load_state_dict(state_dict)"""
-
-if __name__ == "__main__":
-    from data import MyDataset, DataCollatorSpeechSeq2SeqWithPadding
-    import os
-
-    model = ASRModel()
-    model.load()
-
-    dataset = MyDataset(dev=True)
-
-    audio_encoder_name = "openai/whisper-large-v3"
-    processor = WhisperProcessor.from_pretrained(audio_encoder_name)
-
-    data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=model.tokenizer)
-
-    data = data_collator([dataset[i] for i in range(2)])
-    data = {k:v.to("cuda") for k,v in data.items() if k!="text_labels"}
-
-    with autocast(enabled=True):
-        transcript = model.inference(data)
-
-    for t in transcript:
-        print(t)
 

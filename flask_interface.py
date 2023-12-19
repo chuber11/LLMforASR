@@ -40,16 +40,10 @@ def initialize_model():
     
     return model, processor, max_batch_size
 
-def infer_batch(audio_wavs, prefix="", input_language="en", task="transcribe", audio_sample_rate=16000):
+def infer_batch(audio_wavs, prefix="", input_language="en", audio_sample_rate=16000):
     # get device based on the model parameters
     device = next(model.parameters()).device
 
-    #audio_features = torch.zeros(len(audio_wavs),max(len(w) for w in audio_wavs),device=device)
-    #attention_mask = torch.zeros(len(audio_wavs),max(len(w) for w in audio_wavs),device=device)
-    #for i,wav in enumerate(audio_wavs):
-    #    audio_features[i,:len(wav)] = wav
-    #    attention_mask[i,:len(wav)] = 1
-        
     #data = {"audio_features": audio_features, "attention_mask": attention_mask}
     data = processor([w.numpy() for w in audio_wavs], sampling_rate=16000, return_tensors="pt")
     data = {"audio_features": data["input_features"].cuda()}
@@ -73,19 +67,14 @@ def use_model(reqs):
             req.publish(result)
             return
         
-        if input_language == output_language:
-            task = "transcribe"
-        else:
-            task = "translate"
-        
-        hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix)[0]
+        hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, prefix=prefix)[0]
             
         result = {"hypo": hypo.strip()}
         req.publish(result)
 
     else:
         audio_tensors = list()
-        prefixes = ['']
+        prefixes = list()
         input_languages = list()
         output_languages = list()
 
@@ -105,35 +94,17 @@ def use_model(reqs):
             batch_runnable = True
 
         if batch_runnable:
-            if unique_input_languages[0] == unique_output_languages[0]:
-                task = "transcribe"
-            elif unique_output_languages[0] == 'en':
-                task = "translate"
-            else:
-                for req in reqs:
-                    result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(unique_input_languages[0], unique_output_languages[0])}
-                    req.publish(result)
-                return
-            hypos = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], task=task, prefix=prefixes[0])
+            hypos = infer_batch(audio_wavs=audio_tensors, input_language=input_languages[0], prefix=prefixes[0])
 
             for req, hypo in zip(reqs, hypos):
                 result = {"hypo": hypo.strip()}
                 req.publish(result)
         else:
             for req, audio_tensor, prefix, input_language, output_language \
-                    in zip(reqs, audio_tensors, prefixes[1:], input_languages, output_languages):
-                if not (input_language == output_language or output_language == 'en'):
-                    result = {"hypo": "", "status":400, "message": 'Wrong option. Perform X->X "transcribe" or X->English "translate". Found {} -> {}'.format(input_language, output_language)}
-                    req.publish(result)
-                else:
-                    
-                    if input_language == output_language:
-                        task = "transcribe"
-                    else:
-                        task = "translate"
-                    hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, task=task, prefix=prefix)[0]                    
-                    result = {"hypo": hypo.strip()}
-                    req.publish(result)
+                    in zip(reqs, audio_tensors, prefixes, input_languages, output_languages):
+                hypo = infer_batch(audio_wavs=[audio_tensor], input_language=input_language, prefix=prefix)[0]                    
+                result = {"hypo": hypo.strip()}
+                req.publish(result)
 
 def run_decoding():
     while True:

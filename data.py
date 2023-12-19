@@ -25,6 +25,7 @@ class MyDataset(Dataset):
         if replace is None:
             replace = [("/project/asr_systems/LT2021/EN/data","/export/data2/chuber/ASR/data/EN")]
 
+        self.ids = []
         self.audio_paths = []
         self.timestamps = []
         self.labels = []
@@ -33,6 +34,7 @@ class MyDataset(Dataset):
             labelfile = ".".join(segfile.split(".")[:-2])+".cased"
             for line, line2 in zip(open(segfile),open(labelfile)):
                 line = line.strip().split()
+                self.ids.append(line[0])
                 audio_path = line[1]
                 for r in replace:
                     audio_path = audio_path.replace(r[0],r[1])
@@ -50,9 +52,9 @@ class MyDataset(Dataset):
 
         random.seed(42)
 
-        combined_lists = list(zip(self.audio_paths, self.timestamps, self.labels))
+        combined_lists = list(zip(self.ids, self.audio_paths, self.timestamps, self.labels))
         random.shuffle(combined_lists)
-        self.audio_paths, self.timestamps, self.labels = zip(*combined_lists)
+        self.ids, self.audio_paths, self.timestamps, self.labels = zip(*combined_lists)
 
         self.len = len(self.audio_paths)
         if dev:
@@ -69,7 +71,7 @@ class MyDataset(Dataset):
             start, end = self.timestamps[idx]
             audio = audio[:,int(1600*start),int(16000*end)]
         #sample = {"audio":audio[0].numpy(),"labels":self.labels[idx]}
-        sample = {"audio":audio,"labels":self.labels[idx]}
+        sample = {"audio":audio,"labels":self.labels[idx], "id":self.ids[idx]}
         return sample
 
 @dataclass
@@ -89,7 +91,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         text_labels = {"input_ids": input_ids, "attention_mask":attention_mask}
 
-        batch = {"audio_features": audio, "text_labels":text_labels}
+        batch = {"audio_features": audio, "text_labels":text_labels, "ids":[item["id"] for item in features]}
 
         return batch
 
