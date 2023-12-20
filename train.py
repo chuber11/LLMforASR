@@ -69,9 +69,10 @@ training_args = Seq2SeqTrainingArguments(
     output_dir="./saves",
     per_device_train_batch_size=16,
     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
-    learning_rate=6e-5,
+    learning_rate=2e-4,
+    lr_scheduler_type="constant_with_warmup",
     warmup_steps=0, #500,
-    max_steps=20000,
+    max_steps=40000,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
@@ -102,5 +103,5 @@ trainer = MySeq2SeqTrainer(
     callbacks=[MyCallback],
 )
 
-trainer.train()
+trainer.train(resume_from_checkpoint=True)
 

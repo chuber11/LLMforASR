@@ -181,32 +181,48 @@ def prepare_inputs_for_generation(
     return model_inputs
 
 class BridgeNetwork(nn.Module):
-    def __init__(self):
+    def __init__(self, num_layers, dim_h):
         super().__init__()
 
-        dim_h = 4096
-        
-        self.cnn1 = nn.Conv1d(1280,dim_h,4,2)
-        self.cnn2 = nn.Conv1d(dim_h,dim_h,4,2)
-        self.cnn3 = nn.Conv1d(dim_h,4096,4,2)
+        dim_in = 1280
+        dim_out = 4096
+
+        layers = []
+        for i in range(num_layers):
+            layers.append(nn.Conv1d(dim_h if i!=0 else dim_in,
+                                    dim_h if i!=num_layers-1 else dim_out,
+                                    4,
+                                    2))
+
+        self.layers = nn.ModuleList(layers)
 
     def forward(self, inp):
         with autocast(enabled=True):
-            out = inp.transpose(2,1)
-            out = self.cnn1(out)
-            out = self.cnn2(F.gelu(out))
-            out = self.cnn3(F.gelu(out))
+            out = self.layers[0](inp.transpose(2,1))
+            for layer in self.layers[1:]:
+                out = layer(F.gelu(out))
             out = out.transpose(2,1)
         return out
 
+class ASRModelConfig(PretrainedConfig):
+    def __init__(self, *args, **kwargs):
+        self.decoder_name="mistralai/Mistral-7B-Instruct-v0.2"
+        self.audio_encoder_name="openai/whisper-large-v3"
+        self.bridge_layers = 3
+        self.bridge_dim = 4096
+
+        super().__init__(*args, **kwargs)
+
 class ASRModel(PreTrainedModel):
     supports_gradient_checkpointing = True
+    config_class = ASRModelConfig
 
-    def __init__(self, decoder_name="mistralai/Mistral-7B-Instruct-v0.2", audio_encoder_name="openai/whisper-large-v3", tokenizer=None):
-        config = PretrainedConfig()
+    def __init__(self, config=None, tokenizer=None):
+        if config is None:
+            config = ASRModelConfig()
         super().__init__(config)
 
-        self.decoder = AutoModelForCausalLM.from_pretrained(decoder_name, torch_dtype="auto", device_map="cuda")
+        self.decoder = AutoModelForCausalLM.from_pretrained(config.decoder_name, torch_dtype="auto", device_map="cuda")
 
         self.decoder.forward = MethodType(forward_llm, self.decoder) # Ugly but works
         self.decoder.prepare_inputs_for_generation = MethodType(prepare_inputs_for_generation, self.decoder)
@@ -214,14 +230,14 @@ class ASRModel(PreTrainedModel):
         for p in self.decoder.parameters(): # Freeze decoder
             p.requires_grad = False
 
-        self.audio_encoder = WhisperForConditionalGeneration.from_pretrained(audio_encoder_name, torch_dtype="auto", device_map="cuda").model.encoder
+        self.audio_encoder = WhisperForConditionalGeneration.from_pretrained(config.audio_encoder_name, torch_dtype="auto", device_map="cuda").model.encoder
 
         for p in self.audio_encoder.parameters(): # Freeze audio encoder
             p.requires_grad = False
 
-        self.bridge_network = BridgeNetwork().to("cuda")
+        self.bridge_network = BridgeNetwork(config.bridge_layers,config.bridge_dim).to("cuda")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(decoder_name) if tokenizer is None else tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(config.decoder_name) if tokenizer is None else tokenizer
         self.tokenizer.pad_token = self.tokenizer.unk_token
 
         self.set_pre_prompt()
@@ -257,30 +273,19 @@ class ASRModel(PreTrainedModel):
             print("IN",self.tokenizer.batch_decode(inputs["input_ids"])[0])
 
         inputs["audio_features"] = self.encode_audio(inputs["audio_features"]) #.half())
+
+        print(inputs.keys())
         
         outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6)
         text = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         
-        print("OUT",self.tokenizer.batch_decode(outputs)[0])
+        #print("OUT",self.tokenizer.batch_decode(outputs)[0])
 
         #text = [t if not t.startswith("<unk> ") else t[len("<unk> "):] for t in text]
 
         return text
 
-    def save_pretrained(self, save_directory, *args, **kwargs):
-        os.makedirs(save_directory, exist_ok=True)
-        torch.save(self.bridge_network.state_dict(), save_directory+"/bridge_network.pt")
-
-    def load(self, path="saves/checkpoint-20000"):
-        self.bridge_network.load_state_dict(torch.load(path+"/bridge_network.pt"))
-        """from safetensors.torch import load_file as safe_load_file
-        from glob import glob
-        state_dict = {}
-
-        for f in glob(path+"/*.safetensors"):
-            t = safe_load_file(f)
-            for k,v in t.items():
-                state_dict[k] = v
-
-        self.load_state_dict(state_dict)"""
+    def save_pretrained(self, *args, **kwargs):
+        state_dict = {k:v for k,v in self.state_dict().items() if k.startswith("bridge_network")}
+        super().save_pretrained(*args, state_dict=state_dict, **kwargs)
 

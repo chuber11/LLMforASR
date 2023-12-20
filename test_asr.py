@@ -10,10 +10,16 @@ from torch.cuda.amp import autocast
 
 from tqdm import tqdm
 
-model = ASRModel()
-model.load()
+import sys
+from glob import glob
 
-dataset = MyDataset(segfiles="data_test/*.test.seg.aligned")
+path = sys.argv[1] if len(sys.argv) > 1 else ""
+
+print("Using path",path)
+
+model = ASRModel.from_pretrained(path)
+
+dataset = MyDataset(segfiles="data_test/*.test.seg.aligned", dev=True)
 
 audio_encoder_name = "openai/whisper-large-v3"
 processor = WhisperProcessor.from_pretrained(audio_encoder_name)
