@@ -70,7 +70,7 @@ def forward_llm(
     if position_ids is None:
         if past_key_values is None:
             position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
+            #position_ids.masked_fill_(attention_mask == 0, 1)
         else:
             past_length = past_key_values[0][0].shape[2]
             position_ids = torch.full_like(input_ids, past_length)
@@ -216,6 +216,9 @@ class ASRModelConfig(PretrainedConfig):
 class ASRModel(PreTrainedModel):
     supports_gradient_checkpointing = True
     config_class = ASRModelConfig
+    _keys_to_ignore_on_load_missing = [r'^(?!bridge_network).*']
+    _supports_flash_attn_2 = True
+    _supports_cache_class = True
 
     def __init__(self, config=None, tokenizer=None):
         if config is None:
@@ -274,8 +277,6 @@ class ASRModel(PreTrainedModel):
 
         inputs["audio_features"] = self.encode_audio(inputs["audio_features"]) #.half())
 
-        print(inputs.keys())
-        
         outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6)
         text = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         
@@ -285,7 +286,7 @@ class ASRModel(PreTrainedModel):
 
         return text
 
-    def save_pretrained(self, *args, **kwargs):
+    def save_pretrained(self, *args, state_dict=None, **kwargs):
         state_dict = {k:v for k,v in self.state_dict().items() if k.startswith("bridge_network")}
         super().save_pretrained(*args, state_dict=state_dict, **kwargs)
 

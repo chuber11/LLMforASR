@@ -63,15 +63,16 @@ processor = WhisperProcessor.from_pretrained(audio_encoder_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
 
-model = ASRModel(tokenizer=tokenizer)
+#model = ASRModel(tokenizer=tokenizer)
+model = ASRModel.from_pretrained("saves/model2/checkpoint-20000")
 
 training_args = Seq2SeqTrainingArguments(
     output_dir="./saves",
     per_device_train_batch_size=16,
     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
-    learning_rate=2e-4,
+    learning_rate=1e-4,
     lr_scheduler_type="constant_with_warmup",
-    warmup_steps=0, #500,
+    warmup_steps=50, #500,
     max_steps=40000,
     gradient_checkpointing=True,
     fp16=True,
@@ -103,5 +104,5 @@ trainer = MySeq2SeqTrainer(
     callbacks=[MyCallback],
 )
 
-trainer.train(resume_from_checkpoint=True)
+trainer.train(resume_from_checkpoint=False)
 
