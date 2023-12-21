@@ -51,7 +51,7 @@ def forward_llm(
                                input_ids[:,1:-1]],1)
         inputs_embeds = self.model.get_input_embeddings()(input_ids)
 
-        audio_features = 0.045*audio_features
+        audio_features = self.audio_features_factor*audio_features
 
         #printms("I",inputs_embeds)
         #printms("A",audio_features)
@@ -187,29 +187,31 @@ class BridgeNetwork(nn.Module):
         dim_in = 1280
         dim_out = 4096
 
-        layers = []
+        self.layers = nn.ModuleList()
         for i in range(num_layers):
-            layers.append(nn.Conv1d(dim_h if i!=0 else dim_in,
-                                    dim_h if i!=num_layers-1 else dim_out,
-                                    4,
-                                    2))
+            layer = nn.Conv1d(dim_h if i!=0 else dim_in,
+                              dim_h,
+                              kernel_size=4,
+                              stride=2)
+            self.layers.append(layer)
 
-        self.layers = nn.ModuleList(layers)
+        self.proj = nn.Linear(dim_h,dim_out)
 
     def forward(self, inp):
         with autocast(enabled=True):
-            out = self.layers[0](inp.transpose(2,1))
-            for layer in self.layers[1:]:
-                out = layer(F.gelu(out))
-            out = out.transpose(2,1)
+            out = inp.transpose(2,1)
+            for layer in self.layers:
+                out = F.gelu(layer(out))
+            out = self.proj(out.transpose(2,1))
         return out
 
 class ASRModelConfig(PretrainedConfig):
     def __init__(self, *args, **kwargs):
         self.decoder_name="mistralai/Mistral-7B-Instruct-v0.2"
         self.audio_encoder_name="openai/whisper-large-v3"
-        self.bridge_layers = 3
-        self.bridge_dim = 4096
+        self.bridge_layers = 2
+        self.bridge_dim = 1280
+        self.audio_features_factor = 0.04
 
         super().__init__(*args, **kwargs)
 
@@ -226,6 +228,7 @@ class ASRModel(PreTrainedModel):
         super().__init__(config)
 
         self.decoder = AutoModelForCausalLM.from_pretrained(config.decoder_name, torch_dtype="auto", device_map="cuda")
+        self.decoder.audio_features_factor = config.audio_features_factor if hasattr(config, "audio_features_factor") else 0.04
 
         self.decoder.forward = MethodType(forward_llm, self.decoder) # Ugly but works
         self.decoder.prepare_inputs_for_generation = MethodType(prepare_inputs_for_generation, self.decoder)
@@ -251,7 +254,7 @@ class ASRModel(PreTrainedModel):
     def set_pre_prompt(self, pre_prompt="[INST]"):
         self.decoder.pre_prompt_tokens = self.tokenizer([pre_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"]
 
-    def set_post_prompt(self, post_prompt="Transcribe the given audio recording. [/INST]"):
+    def set_post_prompt(self, post_prompt="This was an audio recording. I think the transcript is: [/INST]"):
         self.decoder.post_prompt_tokens = self.tokenizer([post_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"][:,1:]
 
     def encode_audio(self, audio_features):
