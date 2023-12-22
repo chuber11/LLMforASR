@@ -10,6 +10,9 @@ from transformers import TrainerCallback
 
 import math
 
+import sys
+from glob import glob
+
 class MySeq2SeqTrainer(Seq2SeqTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -63,11 +66,23 @@ processor = WhisperProcessor.from_pretrained(audio_encoder_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=tokenizer)
 
-model = ASRModel(tokenizer=tokenizer)
-#model = ASRModel.from_pretrained("saves/model2/checkpoint-20000")
+if len(sys.argv)<=1:
+    print("You have to specify a model name")
+    sys.exit()
+model_path = sys.argv[1]
+output_dir="./saves/"+model_path
+
+checkpoint = glob(output_dir+"/checkpoint*")
+resume = len(checkpoint) > 0
+
+if not resume:
+    model = ASRModel(tokenizer=tokenizer)
+else:
+    model = ASRModel.from_pretrained(checkpoint[0])
+    print("Resuming training")
 
 training_args = Seq2SeqTrainingArguments(
-    output_dir="./saves",
+    output_dir=output_dir,
     per_device_train_batch_size=16,
     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
     learning_rate=1e-4,
@@ -104,5 +119,5 @@ trainer = MySeq2SeqTrainer(
     callbacks=[MyCallback],
 )
 
-trainer.train(resume_from_checkpoint=False)
+trainer.train(resume_from_checkpoint=resume)
 

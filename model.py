@@ -98,8 +98,8 @@ def forward_llm(
     loss = None
     if labels is not None:
         # Shift so that tokens < n predict n
-        shift_logits = logits[..., -(input_length-2):, :].contiguous()
-        shift_labels = labels[..., 2:].contiguous()
+        shift_logits = logits[..., -(input_length-1):, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
         # Flatten the tokens
         loss_fct = CrossEntropyLoss(ignore_index=0)
         shift_logits = shift_logits.view(-1, self.config.vocab_size)
@@ -210,7 +210,7 @@ class ASRModelConfig(PretrainedConfig):
         self.decoder_name="mistralai/Mistral-7B-Instruct-v0.2"
         self.audio_encoder_name="openai/whisper-large-v3"
         self.bridge_layers = 2
-        self.bridge_dim = 1280
+        self.bridge_dim = 4096
         self.audio_features_factor = 0.04
 
         super().__init__(*args, **kwargs)
