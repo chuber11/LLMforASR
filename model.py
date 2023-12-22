@@ -36,19 +36,24 @@ def forward_llm(
     output_hidden_states: Optional[bool] = None,
     return_dict: Optional[bool] = None,
 ) -> Union[Tuple, CausalLMOutputWithPast]:
-
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
     output_hidden_states = (
         output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
     )
     return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-    if audio_features is not None:
+    attention_mask = torch.cat([torch.ones(attention_mask.shape[0],self.pre_prompt_tokens.shape[1]+audio_features.shape[1]+self.post_prompt_tokens.shape[1], dtype=attention_mask.dtype, device=attention_mask.device),
+                                attention_mask[:,1:]],1)
+
+    if position_ids is None:
+        position_ids = attention_mask.long().cumsum(-1) - 1
+        #position_ids.masked_fill_(attention_mask == 0, 1)
+
+    if past_key_values is None:
         input_length = input_ids.shape[1]
-        input_ids[input_ids==1] = 0
         input_ids = torch.cat([self.pre_prompt_tokens.expand(input_ids.shape[0],-1),
                                self.post_prompt_tokens.expand(input_ids.shape[0],-1),
-                               input_ids[:,1:-1]],1)
+                               input_ids[:,1:]],1)
         inputs_embeds = self.model.get_input_embeddings()(input_ids)
 
         audio_features = self.audio_features_factor*audio_features
@@ -59,22 +64,10 @@ def forward_llm(
         inputs_embeds = torch.cat([inputs_embeds[:,:self.pre_prompt_tokens.shape[1]],
                                    audio_features,
                                    inputs_embeds[:,self.pre_prompt_tokens.shape[1]:]],1)
-
-        attention_mask = torch.cat([torch.ones(attention_mask.shape[0],self.pre_prompt_tokens.shape[1]+audio_features.shape[1]+self.post_prompt_tokens.shape[1], dtype=attention_mask.dtype, device=attention_mask.device),
-                                    attention_mask[:,1:-1]],1)
-
         input_ids = None
     else:
         input_ids = input_ids[:,-1:]
-
-    if position_ids is None:
-        if past_key_values is None:
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            #position_ids.masked_fill_(attention_mask == 0, 1)
-        else:
-            past_length = past_key_values[0][0].shape[2]
-            position_ids = torch.full_like(input_ids, past_length)
-            attention_mask = torch.ones(input_ids.shape[0],past_length+1,dtype=torch.bool,device=input_ids.device)
+        position_ids = position_ids[:,-1:]
 
     #print(input_ids.shape if input_ids is not None else inputs_embeds.shape, attention_mask.shape, position_ids.shape)
 
@@ -92,14 +85,16 @@ def forward_llm(
     )
 
     hidden_states = outputs[0]
+    if past_key_values is None:
+        hidden_states = hidden_states[..., -input_length:, :]
     logits = self.lm_head(hidden_states)
     logits = logits.float()
 
     loss = None
     if labels is not None:
         # Shift so that tokens < n predict n
-        shift_logits = logits[..., -(input_length-1):, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
+        shift_logits = logits.contiguous()
+        shift_labels = labels.contiguous()
         # Flatten the tokens
         loss_fct = CrossEntropyLoss(ignore_index=0)
         shift_logits = shift_logits.view(-1, self.config.vocab_size)
@@ -152,16 +147,6 @@ def prepare_inputs_for_generation(
             and cache_length + input_ids.shape[1] > max_cache_length
         ):
             attention_mask = attention_mask[:, -max_cache_length:]
-
-        audio_features = None
-
-    """position_ids = kwargs.get("position_ids", None)
-    if attention_mask is not None and position_ids is None:
-        # create position_ids on the fly for batch generation
-        position_ids = attention_mask.long().cumsum(-1) - 1
-        position_ids.masked_fill_(attention_mask == 0, 1)
-        if past_key_values:
-            position_ids = position_ids[:, -input_ids.shape[1] :]"""
 
     # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
     if inputs_embeds is not None and past_key_values is None:
@@ -266,7 +251,6 @@ class ASRModel(PreTrainedModel):
         audio_features = self.encode_audio(audio_features)
 
         text_labels["audio_features"] = audio_features
-        text_labels["labels"] = text_labels["input_ids"]
 
         prediction = self.decoder(**text_labels)
 
@@ -276,14 +260,14 @@ class ASRModel(PreTrainedModel):
         if "input_ids" not in inputs:
             inputs["input_ids"] = torch.ones(inputs["audio_features"].shape[0], 1, device="cuda", dtype=torch.int64)
         else:
-            print("IN",self.tokenizer.batch_decode(inputs["input_ids"])[0])
+            print("IN",self.tokenizer.batch_decode(inputs["input_ids"]))
 
-        inputs["audio_features"] = self.encode_audio(inputs["audio_features"]) #.half())
+        inputs["audio_features"] = self.encode_audio(inputs["audio_features"])
 
         outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6)
         text = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         
-        #print("OUT",self.tokenizer.batch_decode(outputs)[0])
+        print("OUT",self.tokenizer.batch_decode(outputs))
 
         #text = [t if not t.startswith("<unk> ") else t[len("<unk> "):] for t in text]
 

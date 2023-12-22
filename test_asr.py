@@ -26,13 +26,15 @@ processor = WhisperProcessor.from_pretrained(audio_encoder_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=model.tokenizer, return_ids=True)
 
-batch_size = 128
+batch_size = 1
 
 with open(f"hypos/hypo_{path.replace('/','_')}.txt", "w") as f:
     for i in tqdm(range(0,len(dataset),batch_size)):
-        data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))])
+        data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))],inference=False)
         ids = data.pop("ids")
+        #text_labels = data["text_labels"]
         data = {k:v.to("cuda") for k,v in data.items() if k!="text_labels"}
+        #data["input_ids"] = text_labels["input_ids"].to("cuda")[:,:5]
 
         with autocast(enabled=True):
             transcript = model.inference(data)

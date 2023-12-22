@@ -81,17 +81,18 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     tokenizer: Any
     return_ids: bool = False
 
-    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]], inference=False) -> Dict[str, torch.Tensor]:
 
         audio = torch.cat([self.processor(item["audio"], sampling_rate=16000, return_tensors="pt").input_features for item in features], dim=0)
-        text_labels = self.tokenizer([feature["labels"] for feature in features], return_tensors="pt", padding=True)
+        text_labels = self.tokenizer([feature["labels"]+self.tokenizer.eos_token for feature in features], return_tensors="pt", padding=True)
 
-        input_ids, attention_mask = text_labels["input_ids"], text_labels["attention_mask"]
-
-        input_ids = torch.cat([input_ids,torch.full((input_ids.shape[0],1), self.tokenizer.eos_token_id)],1)
-        attention_mask = torch.cat([attention_mask,torch.ones(attention_mask.shape[0],1)],1)
-
-        text_labels = {"input_ids": input_ids, "attention_mask":attention_mask}
+        input_ids = text_labels["input_ids"]
+        if not inference:
+            text_labels["attention_mask"][input_ids==1] = 0
+            input_ids[input_ids==1] = 0 # 1 = sos_token is added via pre prompt
+        text_labels["input_ids"] = input_ids[:,:-1]
+        text_labels["attention_mask"] = text_labels["attention_mask"][:,:-1]
+        text_labels["labels"] = input_ids[:,1:]
 
         batch = {"audio_features": audio, "text_labels":text_labels}
         if self.return_ids:
