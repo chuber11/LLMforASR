@@ -24,9 +24,8 @@ def create_unique_list(my_list):
     my_list = list(set(my_list))
     return my_list
 
-def initialize_model():
-    model = ASRModel()
-    model.load()
+def initialize_model(path="saves/model6/checkpoint-60000"):
+    model = ASRModel.from_pretrained(path)
     
     audio_encoder_name = "openai/whisper-large-v3"
     processor = WhisperProcessor.from_pretrained(audio_encoder_name)
@@ -54,7 +53,6 @@ def infer_batch(audio_wavs, prefix="", input_language="en", audio_sample_rate=16
     with autocast(enabled=True):
         text_output_raw = model.inference(data)
 
-    print(text_output_raw[0])
     return text_output_raw
 
 def use_model(reqs):
@@ -214,7 +212,9 @@ def set_post_prompt():
     model.set_post_prompt(post_prompt)
     return "DONE", 200
 
-model, processor, max_batch_size = initialize_model()
+path = sys.argv[1]
+
+model, processor, max_batch_size = initialize_model(path)
 
 queue_in = queue.PriorityQueue()
 dict_out = {}

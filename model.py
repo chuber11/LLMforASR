@@ -197,6 +197,7 @@ class ASRModelConfig(PretrainedConfig):
         self.bridge_layers = 2
         self.bridge_dim = 4096
         self.audio_features_factor = 0.04
+        self.decoder_peft = True
 
         super().__init__(*args, **kwargs)
 
@@ -234,6 +235,14 @@ class ASRModel(PreTrainedModel):
         self.set_pre_prompt()
         self.set_post_prompt()
 
+        if hasattr(config, "decoder_peft") and config.decoder_peft:
+            from peft import get_peft_model, LoraConfig, IA3Config
+
+            #peft_config = LoraConfig(inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all")
+            peft_config = IA3Config(target_modules=["k_proj", "v_proj", "down_proj"], feedforward_modules=["down_proj"])
+            self.decoder = get_peft_model(self.decoder, peft_config)
+            self.decoder.print_trainable_parameters()
+
         print(f"Number of parameters: {sum(p.numel() for p in self.parameters())/1000000:.0f} M, number of trainable parameters: {sum(p.numel() for p in self.parameters() if p.requires_grad)/1000000:.0f} M")
 
     def set_pre_prompt(self, pre_prompt="[INST]"):
@@ -260,17 +269,14 @@ class ASRModel(PreTrainedModel):
         if "input_ids" not in inputs:
             inputs["input_ids"] = torch.ones(inputs["audio_features"].shape[0], 1, device="cuda", dtype=torch.int64)
         else:
-            print("IN",self.tokenizer.batch_decode(inputs["input_ids"]))
+            pass #print("IN",self.tokenizer.batch_decode(inputs["input_ids"]))
 
         inputs["audio_features"] = self.encode_audio(inputs["audio_features"])
 
         outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6)
         text = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         
-        print("OUT",self.tokenizer.batch_decode(outputs))
-
-        #text = [t if not t.startswith("<unk> ") else t[len("<unk> "):] for t in text]
-
+        #print("OUT",self.tokenizer.batch_decode(outputs))
         return text
 
     def save_pretrained(self, *args, state_dict=None, **kwargs):
