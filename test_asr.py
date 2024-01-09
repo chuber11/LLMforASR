@@ -14,12 +14,13 @@ import sys
 from glob import glob
 
 path = sys.argv[1] if len(sys.argv) > 1 else ""
+segfile = sys.argv[2] if len(sys.argv) > 2 else "data_test/*.test.seg.aligned"
 
 print("Using path",path)
 
 model = ASRModel.from_pretrained(path)
 
-dataset = MyDataset(segfiles="data_test/*.test.seg.aligned", dev=True)
+dataset = MyDataset(segfiles=segfile, dev=True)
 
 audio_encoder_name = "openai/whisper-large-v3"
 processor = WhisperProcessor.from_pretrained(audio_encoder_name)

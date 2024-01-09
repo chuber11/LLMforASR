@@ -32,7 +32,7 @@ def initialize_model(path="saves/model6/checkpoint-60000"):
 
     print("ASR initialized")
 
-    max_batch_size = 8
+    max_batch_size = 1
 
     if torch.cuda.is_available():
         model = model.cuda()

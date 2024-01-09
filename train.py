@@ -79,7 +79,7 @@ if not resume:
     model = ASRModel(tokenizer=tokenizer)
 else:
     model = ASRModel.from_pretrained(checkpoint[0])
-    print("Resuming training")
+    print("Resuming training with",checkpoint[0])
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,
@@ -97,11 +97,11 @@ training_args = Seq2SeqTrainingArguments(
     save_steps=800,
     eval_steps=800,
     logging_steps=10,
-    save_total_limit=3,
+    save_total_limit=1,
     #report_to=["tensorboard"],
-    #load_best_model_at_end=True,
-    #metric_for_best_model="wer",
-    #greater_is_better=False,
+    load_best_model_at_end=True,
+    metric_for_best_model="loss",
+    greater_is_better=False,
     push_to_hub=False,
     remove_unused_columns=False,
     dataloader_num_workers=1,

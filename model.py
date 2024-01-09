@@ -197,7 +197,7 @@ class ASRModelConfig(PretrainedConfig):
         self.bridge_layers = 2
         self.bridge_dim = 4096
         self.audio_features_factor = 0.04
-        self.decoder_peft = True
+        self.decoder_peft = False
 
         super().__init__(*args, **kwargs)
 
