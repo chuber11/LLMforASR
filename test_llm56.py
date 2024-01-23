@@ -5,7 +5,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 model_id = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True, attn_implementation="flash_attention_2")
+model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True)
 
 text = "Hello my name is"
 
