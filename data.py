@@ -14,7 +14,7 @@ import math
 import random
 
 class MyDataset(Dataset):
-    def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000):
+    def __init__(self, dev=False, segfiles=None, replace=None, max_len=2000, augment=False):
         if segfiles is None:
             segfiles = "data/*.train.seg.aligned"
             #segfiles = "/project/OML/chuber/2022/NMTGMinor/exp/ASR-NW/data/orig_en_cased/cv.train.seg.aligned"
@@ -22,6 +22,9 @@ class MyDataset(Dataset):
 
         if dev:
             segfiles = segfiles.replace("train","dev")
+
+        if augment:
+            segfiles = segfiles.replace("data","data_augment")
 
         if replace is None:
             replace = [("/project/asr_systems/LT2021/EN/data","/export/data2/chuber/ASR/data/EN")]

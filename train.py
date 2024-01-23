@@ -50,9 +50,11 @@ class MyCallback(TrainerCallback):
         if state.global_step == 1:
             pass #control.should_evaluate = True
 
+augment = False
+
 dataset = {} #DatasetDict()
-dataset["train"] = MyDataset()
-dataset["test"] = MyDataset(dev=True)
+dataset["train"] = MyDataset(augment=augment)
+dataset["test"] = MyDataset(dev=True, augment=augment)
 
 print(len(dataset["train"]))
 print(len(dataset["test"]))
@@ -75,27 +77,35 @@ output_dir="./saves/"+model_path
 checkpoint = glob(output_dir+"/checkpoint*")
 resume = len(checkpoint) > 0
 
-if not resume:
+load = "saves/model9/checkpoint-94400"
+
+if not resume and load is None:
     model = ASRModel(tokenizer=tokenizer)
 else:
-    model = ASRModel.from_pretrained(checkpoint[0])
-    print("Resuming training with",checkpoint[0])
+    if resume:
+        model = ASRModel.from_pretrained(checkpoint[0])
+        print("Resuming training with",checkpoint[0])
+    else:
+        model = ASRModel.from_pretrained(load)
+        print("Loading checkpoint from",load)
+
+eval_steps = 800
 
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,
     per_device_train_batch_size=32,
     gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
-    learning_rate=2e-4,
+    learning_rate=2e-5, #8e-4,
     lr_scheduler_type="constant_with_warmup",
     warmup_steps=500,
-    max_steps=60000,
+    max_steps=100000,
     gradient_checkpointing=True,
     fp16=True,
     evaluation_strategy="steps",
     per_device_eval_batch_size=16,
     predict_with_generate=False,#True,
-    save_steps=800,
-    eval_steps=800,
+    save_steps=eval_steps,
+    eval_steps=eval_steps,
     logging_steps=10,
     save_total_limit=1,
     #report_to=["tensorboard"],

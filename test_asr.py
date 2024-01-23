@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 import sys
 from glob import glob
+import os
 
 path = sys.argv[1] if len(sys.argv) > 1 else ""
 segfile = sys.argv[2] if len(sys.argv) > 2 else "data_test/*.test.seg.aligned"
@@ -20,16 +21,22 @@ print("Using path",path)
 
 model = ASRModel.from_pretrained(path)
 
-dataset = MyDataset(segfiles=segfile, dev=True)
+#dataset = MyDataset(segfiles=segfile, dev=True) # Only decode first part of testset
+dataset = MyDataset(segfiles=segfile) # Decode whole testset
 
 audio_encoder_name = "openai/whisper-large-v3"
 processor = WhisperProcessor.from_pretrained(audio_encoder_name)
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, tokenizer=model.tokenizer, return_ids=True)
 
-batch_size = 128
+batch_size = 64
 
-with open(f"hypos/hypo_{path.replace('/','_')}.txt", "w") as f:
+outputfile = f"hypos/hypo_{path.replace('/','_')}.txt"
+if os.path.isfile(outputfile):
+    print("Output file already exists, continue?")
+    breakpoint()
+
+with open(outputfile, "w") as f:
     for i in tqdm(range(0,len(dataset),batch_size)):
         data = data_collator([dataset[j] for j in range(i,min(len(dataset),i+batch_size))],inference=False)
         ids = data.pop("ids")

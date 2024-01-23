@@ -92,6 +92,10 @@ def forward_llm(
 
     loss = None
     if labels is not None:
+        mask = labels.eq(28793).roll(1,dims=1).cumsum(1) # 28793 = "]" -> search for [/INST]
+        mask = (mask[:,-1:].gt(0)) & (mask.eq(0))
+        labels[mask] = 0
+
         # Shift so that tokens < n predict n
         shift_logits = logits.contiguous()
         shift_labels = labels.contiguous()
@@ -198,6 +202,8 @@ class ASRModelConfig(PretrainedConfig):
         self.bridge_dim = 4096
         self.audio_features_factor = 0.04
         self.decoder_peft = False
+        self.post_prompt = "This was an audio recording. I think the transcript is: [/INST]"
+        #self.post_prompt = ""
 
         super().__init__(*args, **kwargs)
 
@@ -212,6 +218,8 @@ class ASRModel(PreTrainedModel):
         if config is None:
             config = ASRModelConfig()
         super().__init__(config)
+
+        self.config = config
 
         self.decoder = AutoModelForCausalLM.from_pretrained(config.decoder_name, torch_dtype="auto", device_map="cuda")
         self.decoder.audio_features_factor = config.audio_features_factor if hasattr(config, "audio_features_factor") else 0.04
@@ -233,7 +241,7 @@ class ASRModel(PreTrainedModel):
         self.tokenizer.pad_token = self.tokenizer.unk_token
 
         self.set_pre_prompt()
-        self.set_post_prompt()
+        self.set_post_prompt(config.post_prompt if hasattr(config, "post_prompt") and config.post_prompt is not None else "This was an audio recording. I think the transcript is: [/INST]")
 
         if hasattr(config, "decoder_peft") and config.decoder_peft:
             from peft import get_peft_model, LoraConfig, IA3Config
@@ -248,7 +256,7 @@ class ASRModel(PreTrainedModel):
     def set_pre_prompt(self, pre_prompt="[INST]"):
         self.decoder.pre_prompt_tokens = self.tokenizer([pre_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"]
 
-    def set_post_prompt(self, post_prompt="This was an audio recording. I think the transcript is: [/INST]"):
+    def set_post_prompt(self, post_prompt):
         self.decoder.post_prompt_tokens = self.tokenizer([post_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"][:,1:]
 
     def encode_audio(self, audio_features):
@@ -270,6 +278,9 @@ class ASRModel(PreTrainedModel):
             inputs["input_ids"] = torch.ones(inputs["audio_features"].shape[0], 1, device="cuda", dtype=torch.int64)
         else:
             pass #print("IN",self.tokenizer.batch_decode(inputs["input_ids"]))
+
+        if self.config.post_prompt == "":        
+            self.set_post_prompt("This was an audio recording. I think the transcript is: [/INST]")
 
         inputs["audio_features"] = self.encode_audio(inputs["audio_features"])
 
