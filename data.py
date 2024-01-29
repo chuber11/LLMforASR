@@ -68,12 +68,15 @@ class MyDataset(Dataset):
         return self.len
 
     def __getitem__(self, idx):
-        #audio, sr = torchaudio.load(self.audio_paths[idx])
-        audio, sr = sf.read(self.audio_paths[idx])
-        #audio, sr = librosa.load(self.audio_paths[idx])
-        if self.timestamps[idx] is not None: # TODO: only load relevant audio
+        if self.timestamps[idx] is not None:
             start, end = self.timestamps[idx]
-            audio = audio[:,int(1600*start),int(16000*end)]
+            audio, sr = sf.read(self.audio_paths[idx], start=int(16000*start),stop=int(16000*end))
+            #audio, sr  = torchaudio.load(self.audio_paths[idx], frame_offset=int(16000*start),num_frames=int(16000*(end-start)))
+            #audio = audio[0]
+        else:
+            #audio, sr = torchaudio.load(self.audio_paths[idx])
+            audio, sr = sf.read(self.audio_paths[idx])
+            #audio, sr = librosa.load(self.audio_paths[idx])
         #sample = {"audio":audio[0].numpy(),"labels":self.labels[idx]}
         sample = {"audio":audio,"labels":self.labels[idx], "id":self.ids[idx]}
         return sample
