@@ -22,6 +22,8 @@ from torch.cuda.amp import autocast
 def printms(s,t):
     print(s,t.shape,t.mean().item(),t.std().item())
 
+#tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2")
+
 def forward_llm(
     self,
     input_ids: torch.LongTensor = None,
@@ -61,6 +63,8 @@ def forward_llm(
         #printms("I",inputs_embeds)
         #printms("A",audio_features)
 
+        #print(tokenizer.batch_decode(input_ids))
+
         inputs_embeds = torch.cat([inputs_embeds[:,:self.pre_prompt_tokens.shape[1]],
                                    audio_features,
                                    inputs_embeds[:,self.pre_prompt_tokens.shape[1]:]],1)
@@ -68,6 +72,8 @@ def forward_llm(
     else:
         input_ids = input_ids[:,-1:]
         position_ids = position_ids[:,-1:]
+
+        #print(tokenizer.batch_decode(input_ids))
 
     #print(input_ids.shape if input_ids is not None else inputs_embeds.shape, attention_mask.shape, position_ids.shape)
 
@@ -202,6 +208,7 @@ class ASRModelConfig(PretrainedConfig):
         self.bridge_dim = 4096
         self.audio_features_factor = 0.04
         self.decoder_peft = False
+        self.lora_rank = None
         self.post_prompt = "This was an audio recording. I think the transcript is: [/INST]"
         #self.post_prompt = ""
 
@@ -219,7 +226,10 @@ class ASRModel(PreTrainedModel):
             config = ASRModelConfig()
         super().__init__(config)
 
-        self.config = config
+        #self.config = config
+        #self.config.post_prompt = ""
+        #self.config.decoder_peft = True
+        #self.config.lora_rank = 16
 
         self.decoder = AutoModelForCausalLM.from_pretrained(config.decoder_name, torch_dtype="auto", device_map="cuda")
         self.decoder.audio_features_factor = config.audio_features_factor if hasattr(config, "audio_features_factor") else 0.04
@@ -246,8 +256,10 @@ class ASRModel(PreTrainedModel):
         if hasattr(config, "decoder_peft") and config.decoder_peft:
             from peft import get_peft_model, LoraConfig, IA3Config
 
-            #peft_config = LoraConfig(inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all")
-            peft_config = IA3Config(target_modules=["k_proj", "v_proj", "down_proj"], feedforward_modules=["down_proj"])
+            if hasattr(config, "lora_rank") and config.lora_rank is not None:
+                peft_config = LoraConfig(inference_mode=False, r=config.lora_rank, lora_alpha=16, lora_dropout=0.1, bias="all")
+            else:
+                peft_config = IA3Config(target_modules=["k_proj", "v_proj", "down_proj"], feedforward_modules=["down_proj"])
             self.decoder = get_peft_model(self.decoder, peft_config)
             self.decoder.print_trainable_parameters()
 
@@ -258,6 +270,7 @@ class ASRModel(PreTrainedModel):
 
     def set_post_prompt(self, post_prompt):
         self.decoder.post_prompt_tokens = self.tokenizer([post_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"][:,1:]
+        print("POST PROMPT",post_prompt)
 
     def encode_audio(self, audio_features):
         audio_encoding = self.audio_encoder(audio_features).last_hidden_state
@@ -273,7 +286,7 @@ class ASRModel(PreTrainedModel):
 
         return prediction
 
-    def inference(self, inputs):
+    def inference(self, inputs, num_beams=1):
         if "input_ids" not in inputs:
             inputs["input_ids"] = torch.ones(inputs["audio_features"].shape[0], 1, device="cuda", dtype=torch.int64)
         else:
@@ -284,7 +297,7 @@ class ASRModel(PreTrainedModel):
 
         inputs["audio_features"] = self.encode_audio(inputs["audio_features"])
 
-        outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6)
+        outputs = self.decoder.generate(**inputs, max_new_tokens=100, no_repeat_ngram_size=6, num_beams=num_beams)
         text = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         
         #print("OUT",self.tokenizer.batch_decode(outputs))
