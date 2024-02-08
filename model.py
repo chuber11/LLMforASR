@@ -10,6 +10,8 @@ from transformers import WhisperForConditionalGeneration
 from transformers.modeling_utils import PreTrainedModel
 from transformers.configuration_utils import PretrainedConfig
 from transformers.cache_utils import Cache
+    
+from peft.peft_model import PeftModel
 
 import os
 
@@ -269,7 +271,8 @@ class ASRModel(PreTrainedModel):
         self.decoder.pre_prompt_tokens = self.tokenizer([pre_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"]
 
     def set_post_prompt(self, post_prompt):
-        self.decoder.post_prompt_tokens = self.tokenizer([post_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"][:,1:]
+        decoder = self.decoder.model if isinstance(self.decoder, PeftModel) else self.decoder
+        decoder.post_prompt_tokens = self.tokenizer([post_prompt], return_tensors="pt", return_attention_mask=False).to("cuda")["input_ids"][:,1:]
         print("POST PROMPT",post_prompt)
 
     def encode_audio(self, audio_features):
